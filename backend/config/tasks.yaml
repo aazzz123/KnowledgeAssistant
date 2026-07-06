@@ -1,0 +1,88 @@
+draft_answer_task:
+  description: >
+    Create a draft answer for the user question.
+
+    Question:
+    {question}
+
+    Retrieved context:
+    {retrieved_context}
+
+    Retrieved evidence JSON:
+    {retrieved_evidence_json}
+
+    Recent session memory:
+    {memory_context}
+
+    Return strict JSON with these keys:
+    conclusion, basis, citations, evidence_gaps, review_note.
+
+    The answer must be evidence-based. Do not invent facts. If the retrieved
+    context is weak, say so directly instead of filling gaps with assumptions.
+  expected_output: >
+    {{"conclusion":"...","basis":["..."],"citations":["..."],"evidence_gaps":["..."],"review_note":"..."}}
+
+final_answer_task:
+  description: >
+    Create the final answer.
+
+    Question:
+    {question}
+
+    Retrieved context:
+    {retrieved_context}
+
+    Retrieved evidence JSON:
+    {retrieved_evidence_json}
+
+    Draft payload JSON:
+    {draft_payload_json}
+
+    Human approved:
+    {approved}
+
+    Human feedback:
+    {feedback}
+
+    Recent session memory:
+    {memory_context}
+
+    If the feedback requests changes, incorporate them. If the draft is approved,
+    polish it without changing the meaning. Keep the final answer grounded in the
+    retrieved context.
+
+    Return strict JSON with these keys:
+    conclusion, basis, citations, evidence_gaps, review_note.
+  expected_output: >
+    {{"conclusion":"...","basis":["..."],"citations":["..."],"evidence_gaps":["..."],"review_note":"..."}}
+
+review_decision_task:
+  description: >
+    Provide a model-side review recommendation and explanation.
+
+    Review policy:
+    {review_policy}
+
+    Rule summary:
+    {rule_summary}
+
+    Review metrics JSON:
+    {review_metrics_json}
+
+    Question:
+    {question}
+
+    Retrieved context:
+    {retrieved_context}
+
+    Draft:
+    {draft}
+
+    Use the rule summary and metrics as the first signal. If the rule summary
+    already indicates obvious problems, keep the recommendation conservative.
+
+    Output exactly two lines:
+    DECISION: REVIEW_REQUIRED or AUTO_APPROVED
+    REASON: one concise sentence
+  expected_output: >
+    Two lines containing a machine-readable review decision and a concise reason.

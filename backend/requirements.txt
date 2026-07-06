@@ -1,0 +1,14 @@
+fastapi==0.112.0
+uvicorn==0.30.6
+pydantic==2.8.2
+openai
+langchain
+langgraph
+langchain-openai
+chromadb
+numpy
+fpdf==1.7.2
+pdfminer.six
+nltk==3.9.1
+requests
+redis
