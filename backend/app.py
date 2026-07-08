@@ -1,8 +1,11 @@
-import logging
+
+"""FastAPI 服务入口，负责对外暴露问答、流式输出、审核和导出接口。"""
+
 import json
+import logging
 import re
-import time
 import threading
+import time
 import uuid
 from contextlib import asynccontextmanager
 from queue import Queue
@@ -38,6 +41,8 @@ session_memory_store = SessionMemoryStore(MEMORY_DIR)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """在服务启动时初始化模型客户端。"""
+    del app
     global llm
     llm = build_llm(llm_type=LLM_TYPE)
     yield
@@ -58,11 +63,13 @@ app.add_middleware(
 
 @app.get("/health")
 async def health():
+    """服务健康检查接口。"""
     return {"status": "ok", "app": APP_NAME}
 
 
 @app.post("/v1/assistant/run", response_model=AssistantRunResponse)
 async def run_assistant(request: AssistantRunRequest):
+    """同步执行整条问答链路，直接返回最终结果或待审核草稿。"""
     if llm is None:
         raise HTTPException(status_code=500, detail="LLM is not initialized.")
 
@@ -72,7 +79,7 @@ async def run_assistant(request: AssistantRunRequest):
             session_id=request.session_id,
             review_policy=request.review_policy,
         )
-        return task_to_response(task, started_at)
+        return task_to_response(task)
     except Exception as exc:
         logger.exception("Failed to run assistant workflow.")
         metrics_recorder.record(
@@ -90,15 +97,19 @@ async def run_assistant_stream(
     session_id: str | None = Query(default=None),
     review_policy: str = Query(default="auto"),
 ):
+    """按 SSE 方式推送阶段事件和答案增量。"""
     if llm is None:
         raise HTTPException(status_code=500, detail="LLM is not initialized.")
 
+    # SSE 这一层只负责转发事件，真正的工作还是放到后台线程里跑，避免阻塞主请求线程。
     queue: Queue[tuple[str, dict[str, Any]]] = Queue()
 
     def on_stage(event_name: str, payload: dict[str, Any]):
+        """把流程中间事件丢进队列，交给外层 SSE 持续输出。"""
         queue.put((event_name, payload))
 
     def worker():
+        """后台线程里执行完整流程，并把结果逐步推给前端。"""
         started_at = time.perf_counter()
         try:
             task, _ = execute_assistant_run(
@@ -120,6 +131,7 @@ async def run_assistant_stream(
             queue.put(("stream_end", {"status": "error"}))
 
     def event_stream():
+        """把队列里的事件转成标准 SSE 文本。"""
         stream_thread = threading.Thread(target=worker, daemon=True)
         stream_thread.start()
         while True:
@@ -133,6 +145,7 @@ async def run_assistant_stream(
 
 @app.post("/v1/assistant/feedback", response_model=FeedbackResponse)
 async def submit_feedback(request: FeedbackRequest):
+    """提交人工审核结果，并在需要时重新定稿。"""
     if llm is None:
         raise HTTPException(status_code=500, detail="LLM is not initialized.")
 
@@ -189,6 +202,7 @@ async def submit_feedback(request: FeedbackRequest):
 
 @app.post("/v1/assistant/export-pdf", response_model=ExportPdfResponse)
 async def export_pdf(request: ExportPdfRequest):
+    """把当前回答导出成 PDF。"""
     title = derive_export_title(request.title or request.question or "知识问答记录")
     content = build_export_content(
         title=title,
@@ -201,6 +215,7 @@ async def export_pdf(request: ExportPdfRequest):
 
 @app.get("/v1/assistant/tasks/{task_id}")
 async def get_task(task_id: str):
+    """查询审核任务详情。"""
     task = review_store.get(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found.")
@@ -209,16 +224,19 @@ async def get_task(task_id: str):
 
 @app.get("/v1/memory/sessions/{session_id}")
 async def get_session_memory(session_id: str):
+    """获取指定会话的记忆快照。"""
     return {"session_id": session_id, **session_memory_store.load(session_id)}
 
 
 @app.get("/v1/observability/events")
 async def get_observability_events(limit: int = Query(default=100, ge=1, le=1000)):
+    """获取最近的运行事件列表。"""
     return {"events": metrics_recorder.load_events(limit=limit)}
 
 
 @app.get("/v1/observability/summary")
 async def get_observability_summary():
+    """获取聚合后的运行概览。"""
     return metrics_recorder.summary()
 
 
@@ -228,6 +246,7 @@ def execute_assistant_run(
     review_policy: str,
     on_stage=None,
 ):
+    """执行问答流程，并根据审核决策决定是否直接定稿。"""
     started_at = time.perf_counter()
     normalized_session_id = session_id or str(uuid.uuid4())
     normalized_review_policy = review_policy.lower()
@@ -246,6 +265,8 @@ def execute_assistant_run(
         question=question,
         session_id=normalized_session_id,
     )
+
+    # 同一个流程既支持同步执行，也支持按阶段推送事件，前端流式模式走的是 stepwise 这条路。
     if on_stage:
         flow.kickoff_stepwise(review_policy=normalized_review_policy, on_stage=on_stage)
     else:
@@ -253,6 +274,7 @@ def execute_assistant_run(
 
     task = flow.build_review_task()
 
+    # 这里只先产出待审核任务，是否直接定稿由后面的审核策略决定。
     if task.review_decision == "REVIEW_REQUIRED":
         review_store.create(task)
         metrics_recorder.record(
@@ -291,7 +313,8 @@ def execute_assistant_run(
     return task, started_at
 
 
-def task_to_response(task, started_at: float):
+def task_to_response(task):
+    """把内部任务对象转换成接口响应结构。"""
     if task.status == "waiting_feedback":
         return AssistantRunResponse(
             task_id=task.task_id,
@@ -324,6 +347,7 @@ def task_to_response(task, started_at: float):
 
 
 def serialize_task(task):
+    """把内部任务拍平成前端可直接消费的字典。"""
     return {
         "task_id": task.task_id,
         "session_id": task.session_id,
@@ -354,21 +378,24 @@ def serialize_task(task):
 
 
 def sse_message(event_name: str, payload: dict[str, Any]) -> str:
+    """把事件名和载荷编码成标准 SSE 文本。"""
     return f"event: {event_name}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
 def derive_export_title(raw: str) -> str:
+    """从用户问题里提炼一个适合当 PDF 文件名的标题。"""
     text = (raw or "").strip()
     text = re.sub(r"(?i)\bpdf\b", "", text)
-    text = re.sub(r"(请|帮我|帮忙|把|将|内容|回答|结果|最近一次对话|最近的对话)", "", text)
+    text = re.sub(r"(请帮我|帮我|把内容|回答|结果|最近一次对话|最近的对话)", "", text)
     text = re.sub(r"(保存为?|导出为?|生成|输出|打印)", "", text)
     text = re.sub(r"(总结|概括|整理)", "", text)
-    text = re.sub(r"[，,。.!！?？；;：:]+", " ", text)
+    text = re.sub(r"[，。？！；:：]+", " ", text)
     text = re.sub(r"\s+", " ", text).strip(" -_")
     return text[:40] or "知识问答记录"
 
 
 def build_export_content(title: str, answer_payload, answer_text: str) -> str:
+    """把回答整理成适合导出的正文格式。"""
     if answer_payload:
         basis = answer_payload.basis or []
         conclusion = answer_payload.conclusion or ""

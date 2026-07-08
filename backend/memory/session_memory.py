@@ -1,3 +1,5 @@
+"""会话记忆存储，负责短期记忆、长期记忆和语义召回。"""
+
 import json
 import threading
 from pathlib import Path
@@ -12,9 +14,10 @@ from retrieval.search_service import get_embeddings
 
 
 class SessionMemoryStore:
-    """Session memory stored in Redis/local JSON plus vectorized long-term recall."""
+    """同时维护 Redis、本地 JSON 和向量化长期记忆。"""
 
     def __init__(self, storage_dir: Path):
+        """初始化存储目录和长期记忆向量集合。"""
         self.storage_dir = storage_dir
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
@@ -23,18 +26,23 @@ class SessionMemoryStore:
         )
 
     def _safe_id(self, session_id: str) -> str:
+        """把会话 id 清洗成适合落文件名的形式。"""
         return "".join(ch for ch in session_id if ch.isalnum() or ch in ("-", "_"))
 
     def _short_path(self, session_id: str) -> Path:
+        """短期记忆文件路径。"""
         return self.storage_dir / f"{self._safe_id(session_id)}.short.json"
 
     def _long_path(self, session_id: str) -> Path:
+        """长期记忆文件路径。"""
         return self.storage_dir / f"{self._safe_id(session_id)}.long.json"
 
     def _path(self, session_id: str) -> Path:
+        """兼容旧结构时使用的历史文件路径。"""
         return self.storage_dir / f"{self._safe_id(session_id)}.json"
 
     def _load_list_path(self, path: Path) -> List[Dict]:
+        """读取一个列表型 JSON 文件。"""
         if not path.exists():
             return []
         with path.open("r", encoding="utf-8") as file:
@@ -42,6 +50,7 @@ class SessionMemoryStore:
         return payload if isinstance(payload, list) else []
 
     def _load_dict_path(self, path: Path) -> Dict:
+        """读取一个字典型 JSON 文件。"""
         if not path.exists():
             return {}
         with path.open("r", encoding="utf-8") as file:
@@ -49,16 +58,19 @@ class SessionMemoryStore:
         return payload if isinstance(payload, dict) else {}
 
     def _write_path(self, path: Path, payload) -> None:
+        """把内容写回到本地 JSON 文件。"""
         with path.open("w", encoding="utf-8") as file:
             json.dump(payload, file, ensure_ascii=False, indent=2)
 
     def load(self, session_id: str) -> Dict:
+        """加载一个会话的完整记忆状态。"""
         cached = redis_cache.get_json(self._state_cache_key(session_id))
         if cached is not None:
             return cached
 
         state = self._load_dict_path(self._short_path(session_id))
         if state:
+            # 新结构优先从 short.json 直接恢复，老结构再走下面的兼容迁移逻辑。
             state.setdefault("session_id", session_id)
             state.setdefault("current_topic", "")
             state.setdefault("recent_questions", [])
@@ -94,6 +106,7 @@ class SessionMemoryStore:
         return state
 
     def append(self, session_id: str, record: MemoryRecord) -> None:
+        """向会话里追加一条新记忆。"""
         with self._lock:
             state = self.load(session_id)
             short_records = state.get("short_term", [])
@@ -115,6 +128,7 @@ class SessionMemoryStore:
             long_records.append(long_record)
             state["long_term"] = long_records[-50:]
 
+            # 这里同时落 Redis、JSON 文件和向量记忆，分别解决读性能、可恢复性和语义召回。
             redis_cache.set_json(
                 self._state_cache_key(session_id),
                 state,
@@ -125,6 +139,7 @@ class SessionMemoryStore:
             self._upsert_long_memory(session_id, long_record)
 
     def summarize_recent(self, session_id: str, query: str = "", limit: int = 3) -> str:
+        """整理最近上下文，供大模型回答时参考。"""
         state = self.load(session_id)
         short_records = state.get("short_term", [])[-limit:]
         long_records = self.semantic_recall(session_id, query=query, limit=limit)
@@ -133,6 +148,7 @@ class SessionMemoryStore:
         if not short_records and not long_records:
             return "No previous short-term or long-term memory for this session."
 
+        # 给模型看的记忆摘要尽量控制得短一点，只保留最近上下文和少量长期回忆。
         chunks = []
         if state.get("current_topic"):
             chunks.append(f"Current topic: {state['current_topic']}")
@@ -162,6 +178,7 @@ class SessionMemoryStore:
         return "\n\n".join(chunks)
 
     def semantic_recall(self, session_id: str, query: str, limit: int = 3) -> List[Dict]:
+        """按语义相似度从长期记忆里回忆内容。"""
         if not query:
             return []
         try:
@@ -192,6 +209,7 @@ class SessionMemoryStore:
             return []
 
     def _to_long_term_record(self, record: MemoryRecord) -> Dict:
+        """把完整记忆压缩成长期记忆条目。"""
         return {
             "task_id": record.task_id,
             "question": record.question,
@@ -205,10 +223,12 @@ class SessionMemoryStore:
         }
 
     def _compact_text(self, text: str, limit: int = 500) -> str:
+        """把长文本压成更适合存长期记忆的短摘要。"""
         clean = " ".join(text.split())
         return clean[:limit]
 
     def _build_summary_context(self, records: List[Dict], limit: int = 4) -> str:
+        """为当前会话生成一段短摘要。"""
         snippets = []
         for item in records[-limit:]:
             snippets.append(
@@ -217,6 +237,7 @@ class SessionMemoryStore:
         return "\n\n".join(snippets)
 
     def _upsert_long_memory(self, session_id: str, long_record: Dict) -> None:
+        """把长期记忆写入向量库，供后续语义召回。"""
         summary = long_record.get("summary", "")
         if not summary:
             return
@@ -225,6 +246,7 @@ class SessionMemoryStore:
             if not embeddings:
                 return
             memory_id = f"{session_id}:{long_record.get('task_id')}"
+            # 长期记忆按 session_id + task_id 固定主键，重复确认同一条结论时可以直接覆盖。
             self.long_collection.upsert(
                 ids=[memory_id],
                 documents=[summary],
@@ -242,11 +264,14 @@ class SessionMemoryStore:
             return
 
     def _state_cache_key(self, session_id: str) -> str:
+        """生成会话状态缓存 key。"""
         return f"session:{self._safe_id(session_id)}:state"
 
 
 def infer_topic(state: Dict) -> str:
+    """从最近问题里推断一个当前主题。"""
     recent_questions = [item for item in state.get("recent_questions", []) if item]
     if not recent_questions:
         return ""
+    # 当前主题先用最后一个问题兜住，简单但够用，后面真要做主题归纳再单独升级。
     return recent_questions[-1][:80]

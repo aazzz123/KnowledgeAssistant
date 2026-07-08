@@ -1,3 +1,5 @@
+"""LangGraph 工作流定义，负责把检索、记忆、起草和审核串起来。"""
+
 import json
 import uuid
 from typing import Callable, Optional, TypedDict
@@ -13,6 +15,8 @@ from tools.save_pdf_tool import save_text_to_pdf
 
 
 class AssistantGraphState(TypedDict, total=False):
+    """图状态里会在各个节点之间流转的字段。"""
+
     task_id: str
     session_id: str
     question: str
@@ -28,7 +32,10 @@ class AssistantGraphState(TypedDict, total=False):
 
 
 class KnowledgeAssistantFlow:
+    """封装整个知识问答流程，供接口层按同步或流式方式调用。"""
+
     def __init__(self, llm, memory: SessionMemoryStore, question: str, session_id: str):
+        """初始化一次问答任务需要的上下文。"""
         self.llm = llm
         self.memory = memory
         self.question = question
@@ -44,6 +51,7 @@ class KnowledgeAssistantFlow:
         self._graph = self._build_graph().compile()
 
     def _build_graph(self) -> StateGraph:
+        """定义图结构：检索 -> 记忆 -> 起草 -> 审核。"""
         graph = StateGraph(AssistantGraphState)
         graph.add_node("retrieve_context", self._retrieve_context)
         graph.add_node("load_memory", self._load_memory)
@@ -57,6 +65,7 @@ class KnowledgeAssistantFlow:
         return graph
 
     def _retrieve_context(self, state: AssistantGraphState) -> AssistantGraphState:
+        """执行检索并把证据整理成图状态。"""
         result = search_knowledge(state["question"])
         return {
             "retrieved_context": result.rendered_context,
@@ -65,6 +74,7 @@ class KnowledgeAssistantFlow:
         }
 
     def _load_memory(self, state: AssistantGraphState) -> AssistantGraphState:
+        """补充最近会话记忆，给后面的答案生成提供上下文。"""
         return {
             "memory_context": self.memory.summarize_recent(
                 state["session_id"], query=state["question"]
@@ -76,6 +86,7 @@ class KnowledgeAssistantFlow:
         state: AssistantGraphState,
         on_conclusion_delta: Optional[Callable[[str], None]] = None,
     ) -> AssistantGraphState:
+        """生成结构化草稿，必要时把结论做流式增量输出。"""
         draft_payload = KnowledgeAssistantChains(self.llm).draft(
             question=state["question"],
             retrieved_context=state["retrieved_context"],
@@ -91,6 +102,7 @@ class KnowledgeAssistantFlow:
         }
 
     def _decide_review(self, state: AssistantGraphState) -> AssistantGraphState:
+        """结合规则和模型解释，决定是否进入人工审核。"""
         if state["review_policy"] == "always":
             return {
                 "review_decision": "REVIEW_REQUIRED",
@@ -109,6 +121,8 @@ class KnowledgeAssistantFlow:
             metrics=state.get("review_metrics", {}),
         )
         rule_summary = summarize_assessment(assessment)
+
+        # 审核判断优先按代码规则卡底线，模型这里只负责补充解释，不反过来推翻规则结果。
         raw_decision = KnowledgeAssistantChains(self.llm).explain_review(
             question=state["question"],
             retrieved_context=state["retrieved_context"],
@@ -126,6 +140,7 @@ class KnowledgeAssistantFlow:
         }
 
     def kickoff(self, review_policy: str):
+        """同步跑完整张图，并把结果回填到实例属性。"""
         result = self._graph.invoke(
             {
                 "task_id": self.task_id,
@@ -148,6 +163,7 @@ class KnowledgeAssistantFlow:
         review_policy: str,
         on_stage: Optional[Callable[[str, dict], None]] = None,
     ):
+        """按阶段执行流程，适合给 SSE 持续推送事件。"""
         state: AssistantGraphState = {
             "task_id": self.task_id,
             "session_id": self.session_id,
@@ -177,6 +193,7 @@ class KnowledgeAssistantFlow:
             self._generate_draft(
                 state,
                 on_conclusion_delta=(
+                    # 草稿流式输出时只推结论文本，等草稿完整后再把其他结构化字段一次性补齐。
                     lambda text: on_stage("draft_delta", {"text": text}) if on_stage else None
                 ),
             )
@@ -210,6 +227,7 @@ class KnowledgeAssistantFlow:
         return state
 
     def build_review_task(self) -> TaskState:
+        """把当前流程状态收敛成一个可存储、可审核的任务对象。"""
         return TaskState(
             task_id=self.task_id,
             session_id=self.session_id,
@@ -226,6 +244,7 @@ class KnowledgeAssistantFlow:
 
 
 def parse_review_decision(raw_decision: str):
+    """从模型返回文本里提取审核决策和原因。"""
     decision = "REVIEW_REQUIRED"
     reason = raw_decision.strip()
     for line in raw_decision.splitlines():
@@ -247,17 +266,25 @@ def finalize_with_feedback(
     approved: bool,
     on_conclusion_delta: Optional[Callable[[str], None]] = None,
 ) -> TaskState:
+    """结合人工审核意见重新定稿，并更新会话记忆与导出文件。"""
     memory_context = memory.summarize_recent(task.session_id, query=task.question)
+
+    # 定稿阶段会把审核意见、检索证据和会话记忆重新拼起来，避免只是机械复用草稿。
     answer_payload = KnowledgeAssistantChains(llm).finalize(
         question=task.question,
         retrieved_context=task.retrieved_context,
         retrieved_evidence_json=json.dumps(
-            [item.model_dump() if hasattr(item, "model_dump") else item for item in task.retrieved_evidence],
+            [
+                item.model_dump() if hasattr(item, "model_dump") else item
+                for item in task.retrieved_evidence
+            ],
             ensure_ascii=False,
             indent=2,
         ),
         draft_payload_json=json.dumps(
-            task.draft_payload.model_dump() if hasattr(task.draft_payload, "model_dump") else task.draft_payload or {},
+            task.draft_payload.model_dump()
+            if hasattr(task.draft_payload, "model_dump")
+            else task.draft_payload or {},
             ensure_ascii=False,
             indent=2,
         ),

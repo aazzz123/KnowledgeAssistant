@@ -30,6 +30,7 @@ class ProprietaryDictionary:
         )
 
     def upsert_entry(self, canonical: str, aliases: List[str]):
+        # 这里按 canonical 做归一，不然同一个术语很容易被反复插成多条。
         normalized_aliases = sorted({alias.strip() for alias in aliases if alias.strip()})
         for entry in self.entries:
             if entry.get("canonical", "").casefold() == canonical.casefold():
@@ -76,6 +77,7 @@ class ProprietaryDictionary:
                     aliases=aliases,
                 )
             )
+            # 命中后把简称、全称和别名一起拼进去，向量召回和 BM25 都能吃到扩展词。
             for term in vocabulary:
                 if term and term not in expansions:
                     expansions.append(term)

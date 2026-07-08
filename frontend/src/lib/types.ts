@@ -9,7 +9,7 @@ export type StructuredAnswerPayload = {
 };
 
 export type EvidenceMetadata = {
-  paper_id: string;
+  document_id: string;
   title: string;
   year: string;
   section: string;

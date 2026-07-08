@@ -4,11 +4,12 @@ import type { ChatMessage } from "@/lib/types";
 
 export function ReviewPanel({
   message,
-  onSubmit
+  onSubmit,
 }: {
   message: ChatMessage | null;
   onSubmit: (approved: boolean, feedback: string) => Promise<void>;
 }) {
+  // 审核意见先在本地留着，等用户点通过或驳回时再一起提交。
   const [feedback, setFeedback] = useState("");
 
   return (
@@ -26,7 +27,7 @@ export function ReviewPanel({
           <textarea
             className="mt-4 min-h-28 w-full resize-none rounded-2xl border border-black/10 bg-[#fcfaf4] px-4 py-3 text-sm outline-none"
             onChange={(event) => setFeedback(event.target.value)}
-            placeholder="填写审核意见。若驳回，建议说明需要修改的内容。"
+            placeholder="填写审核意见。如果驳回，建议说明需要修改的内容。"
             value={feedback}
           />
           <div className="mt-4 flex gap-3">

@@ -28,6 +28,7 @@ def approximate_token_count(text: str) -> int:
 
 
 def normalize_text(text: str) -> str:
+    # 这里先做一次粗清洗，目标不是完美排版，而是把后面的分段和切块尽量稳定下来。
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
@@ -61,9 +62,9 @@ def extract_document_metadata(path: Path, pages: List[Dict[str, str]]) -> Dict[s
     title = first_line if first_line and len(first_line) <= 80 else path.stem
     if not title:
         title = path.stem
-    paper_hash = hashlib.sha1(str(path.resolve()).encode("utf-8")).hexdigest()[:10]
+    document_hash = hashlib.sha1(str(path.resolve()).encode("utf-8")).hexdigest()[:10]
     return {
-        "paper_id": f"{path.stem}-{paper_hash}",
+        "document_id": f"{path.stem}-{document_hash}",
         "title": title,
         "year": year_match.group(0) if year_match else "",
         "source": str(path.resolve()),
@@ -82,6 +83,7 @@ def extract_paragraphs(path: Path) -> List[Dict[str, str]]:
         normalized = normalize_text(page.get("text", ""))
         if not normalized:
             continue
+        # 把潜在标题前后强行打断，后面 section 边界就更容易保住。
         normalized = SECTION_PATTERN.sub(lambda match: f"\n{match.group(0).strip()}\n", normalized)
         blocks = [block.strip() for block in normalized.split("\n\n") if block.strip()]
         for block in blocks:
@@ -130,7 +132,7 @@ def chunk_paragraphs(
         if not text.strip():
             return
         metadata = {
-            "paper_id": paragraph_group[0].get("paper_id", ""),
+            "document_id": paragraph_group[0].get("document_id", ""),
             "title": paragraph_group[0].get("title", ""),
             "year": paragraph_group[0].get("year", ""),
             "section": paragraph_group[0].get("section", ""),
@@ -147,6 +149,7 @@ def chunk_paragraphs(
         current_section = current[0].get("section", "") if current else ""
         next_section = paragraph.get("section", "")
         if current and next_section != current_section:
+            # section 一旦变了，优先断块，避免一个 chunk 跨太多章节导致引用不清楚。
             emit_chunk(current)
             current = []
             current_tokens = 0
@@ -155,6 +158,7 @@ def chunk_paragraphs(
             emit_chunk(current)
             overlap_group: List[Dict[str, str]] = []
             overlap_count = 0
+            # overlap 直接回捞末尾几个段落，检索时能少一点“刚好卡在边界上”的丢信息问题。
             for previous in reversed(current):
                 overlap_group.insert(0, previous)
                 overlap_count += max(1, approximate_token_count(previous.get("text", "")))
@@ -181,6 +185,7 @@ def ingest_files(paths: Iterable[Path], collection_name: str = CHROMA_COLLECTION
         if not chunks:
             continue
 
+        # 关键词索引和向量库一起写，后面混合检索直接复用这两份数据。
         save_keyword_records(build_keyword_records_with_metadata(chunks))
         embeddings = get_embeddings([item["text"] for item in chunks])
         if not embeddings:

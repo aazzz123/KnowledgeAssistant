@@ -1,3 +1,5 @@
+"""Prompt 链封装，负责把工作流输入组织成模型请求。"""
+
 import json
 import re
 from typing import Any, Callable, Dict, Optional
@@ -9,13 +11,17 @@ from orchestration.yaml_loader import load_yaml_config
 
 
 class KnowledgeAssistantChains:
+    """集中管理草稿生成、定稿和审核解释这几类模型调用。"""
+
     agents_config = load_yaml_config("config/agents.yaml")
     tasks_config = load_yaml_config("config/tasks.yaml")
 
     def __init__(self, llm):
+        """保存当前流程要复用的模型实例。"""
         self.llm = llm
 
     def _build_system_prompt(self, agent_key: str) -> str:
+        """根据 agent 配置拼出 system prompt。"""
         agent_config = self.agents_config[agent_key]
         return "\n".join(
             [
@@ -26,6 +32,7 @@ class KnowledgeAssistantChains:
         )
 
     def _invoke(self, agent_key: str, task_key: str, variables: dict) -> str:
+        """发起一次普通文本调用。"""
         return self._invoke_with_stream(
             agent_key=agent_key,
             task_key=task_key,
@@ -39,6 +46,7 @@ class KnowledgeAssistantChains:
         variables: dict,
         on_chunk: Optional[Callable[[str], None]] = None,
     ) -> str:
+        """发起一次支持流式片段回调的调用。"""
         task_config = self.tasks_config[task_key]
         prompt = ChatPromptTemplate.from_messages(
             [
@@ -60,6 +68,7 @@ class KnowledgeAssistantChains:
             return getattr(response, "content", str(response)).strip()
 
         parts: list[str] = []
+        # 有些模型会把 chunk 拆得很碎，这里先累加原始片段，再交给上层决定怎么消费。
         for chunk in chain.stream(variables):
             text = normalize_chunk_text(getattr(chunk, "content", chunk))
             if not text:
@@ -75,6 +84,7 @@ class KnowledgeAssistantChains:
         variables: dict,
         on_conclusion_delta: Optional[Callable[[str], None]] = None,
     ) -> StructuredAnswerPayload:
+        """发起结构化 JSON 调用，并在需要时抽取流式结论。"""
         latest_conclusion = ""
         raw_parts: list[str] = []
 
@@ -83,6 +93,8 @@ class KnowledgeAssistantChains:
             raw_parts.append(text)
             if on_conclusion_delta is None:
                 return
+
+            # 这里不等 JSON 完整闭合，先从半成品里尽量抠出 conclusion，前端才能看到真流式效果。
             partial_conclusion = extract_partial_json_string_field(
                 "".join(raw_parts),
                 "conclusion",
@@ -114,6 +126,7 @@ class KnowledgeAssistantChains:
         memory_context: str,
         on_conclusion_delta: Optional[Callable[[str], None]] = None,
     ) -> StructuredAnswerPayload:
+        """生成草稿答案。"""
         return self._invoke_json(
             agent_key="knowledge_analyst",
             task_key="draft_answer_task",
@@ -137,6 +150,7 @@ class KnowledgeAssistantChains:
         memory_context: str,
         on_conclusion_delta: Optional[Callable[[str], None]] = None,
     ) -> StructuredAnswerPayload:
+        """结合审核意见生成最终答案。"""
         return self._invoke_json(
             agent_key="final_report_writer",
             task_key="final_answer_task",
@@ -161,6 +175,7 @@ class KnowledgeAssistantChains:
         rule_summary: str,
         review_metrics_json: str,
     ) -> str:
+        """让模型补一段审核解释，但不直接控制规则结果。"""
         return self._invoke(
             agent_key="review_decision_agent",
             task_key="review_decision_task",
@@ -176,6 +191,7 @@ class KnowledgeAssistantChains:
 
 
 def parse_json_payload(raw: str) -> Dict[str, Any]:
+    """把模型输出尽量解析成 JSON 对象。"""
     text = raw.strip()
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?", "", text).strip()
@@ -186,10 +202,13 @@ def parse_json_payload(raw: str) -> Dict[str, Any]:
             return payload
     except json.JSONDecodeError:
         pass
+
+    # 模型偶尔还是会跑偏，这里兜成一个最小可用结构，至少别把整条链路打断。
     return {"conclusion": raw, "basis": [], "citations": [], "evidence_gaps": [], "review_note": ""}
 
 
 def ensure_string_list(value: Any) -> list[str]:
+    """把模型返回值尽量规整成字符串列表。"""
     if isinstance(value, list):
         return [str(item).strip() for item in value if str(item).strip()]
     if value is None:
@@ -199,6 +218,7 @@ def ensure_string_list(value: Any) -> list[str]:
 
 
 def normalize_chunk_text(content: Any) -> str:
+    """把不同形态的流式片段统一转成字符串。"""
     if content is None:
         return ""
     if isinstance(content, str):
@@ -217,6 +237,7 @@ def normalize_chunk_text(content: Any) -> str:
 
 
 def extract_partial_json_string_field(raw: str, field_name: str) -> str:
+    """从半成品 JSON 字符串里尽量提取指定字段。"""
     pattern = rf'"{re.escape(field_name)}"\s*:\s*"(?P<value>(?:\\.|[^"])*)'
     match = re.search(pattern, raw, flags=re.DOTALL)
     if not match:
@@ -226,6 +247,7 @@ def extract_partial_json_string_field(raw: str, field_name: str) -> str:
 
 
 def decode_partial_json_string(value: str) -> str:
+    """宽松解码半截 JSON 字符串，优先保证前端能看到正常文字。"""
     try:
         return json.loads(f'"{value}"')
     except json.JSONDecodeError:
@@ -236,6 +258,7 @@ def decode_partial_json_string(value: str) -> str:
 
 
 def render_answer_payload(payload: StructuredAnswerPayload) -> str:
+    """把结构化答案渲染成便于导出和调试的纯文本。"""
     lines = [
         "Conclusion:",
         payload.conclusion or "",

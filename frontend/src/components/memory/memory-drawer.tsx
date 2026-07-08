@@ -1,6 +1,7 @@
 import type { SessionMemoryResponse } from "@/lib/types";
 
 export function MemoryDrawer({ memory }: { memory: SessionMemoryResponse | null }) {
+  // 这里展示的是会话摘要视图，不是完整记忆原文，重点是帮用户快速找上下文。
   return (
     <section className="h-full rounded-[28px] bg-white p-5 shadow-sm ring-1 ring-black/5">
       <h2 className="text-base font-semibold">会话记忆</h2>

@@ -31,6 +31,7 @@ type SessionState = {
 };
 
 function createSession(title = "New Session"): SessionState {
+  // 会话 id 只在前端本地用，够唯一就行，不额外引入 uuid 依赖了。
   const id = `session-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
   return {
     entry: {
@@ -72,6 +73,7 @@ export function ChatLayout() {
         setActiveSessionId(parsed[0].entry.id);
       }
     } catch {
+      // 本地缓存如果结构坏了，直接丢掉比继续带着脏数据跑更省事。
       window.localStorage.removeItem(STORAGE_KEY);
     }
   }, []);
@@ -82,6 +84,7 @@ export function ChatLayout() {
 
   useEffect(() => {
     let mounted = true;
+    // 会话切换后顺手把记忆面板刷新掉，右侧信息就能跟当前聊天保持一致。
     getSessionMemory(activeSessionId)
       .then((payload) => {
         if (mounted) {
@@ -138,6 +141,7 @@ export function ChatLayout() {
       const remaining = current.filter((session) => session.entry.id !== sessionId);
       if (remaining.length > 0) {
         if (sessionId === activeSessionId) {
+          // 删掉当前会话时，顺手把右侧审核态和记忆态也一起切干净。
           setActiveSessionId(remaining[0].entry.id);
           setActiveReviewMessageId(null);
           setSessionMemory(null);
@@ -192,6 +196,7 @@ export function ChatLayout() {
     const stream = createAssistantStream(question, targetSessionId, reviewPolicy);
     streamRef.current = stream;
 
+    // 这里把“阶段事件”和“答案增量事件”拆开处理，前端体验会比最后一次性出结果自然很多。
     stream.addEventListener("task_started", () => setStreamStatus("Task started"));
     stream.addEventListener("retrieval_completed", () => setStreamStatus("Evidence retrieved"));
     stream.addEventListener("draft_completed", () => setStreamStatus("Draft completed"));
@@ -247,6 +252,7 @@ export function ChatLayout() {
     payload: AssistantRunResponse,
     status: "waiting_feedback" | "completed",
   ) {
+    // 最终落库和展示仍然以结构化结果为准，流式 conclusion 只是中间态。
     updateMessage(sessionId, messageId, {
       taskId: payload.task_id,
       conclusion:
@@ -313,6 +319,7 @@ export function ChatLayout() {
       return;
     }
 
+    // 导出默认取这个会话里最近一条 assistant 回复，省得用户再手动选一次。
     setStreamStatus("Exporting PDF...");
     const result = await exportConversationPdf({
       session_id: sessionId,

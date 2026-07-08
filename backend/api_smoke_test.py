@@ -18,7 +18,7 @@ def main():
     run_response = requests.post(
         f"{BASE_URL}/v1/assistant/run",
         json={
-            "question": "总结这份健康档案中的主要健康风险，并给出引用依据。",
+            "question": "Summarize the key points in this private document and cite the supporting evidence.",
             "session_id": "demo-session",
             "review_policy": "auto",
         },
@@ -37,7 +37,7 @@ def main():
         json={
             "task_id": task_id,
             "approved": False,
-            "feedback": "请保留结论、依据、引用片段和证据不足四个结构。",
+            "feedback": "Please keep the answer structured with conclusion, basis, citations, and evidence gaps.",
         },
         timeout=120,
     )

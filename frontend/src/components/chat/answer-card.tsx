@@ -3,6 +3,7 @@ import type { ChatMessage } from "@/lib/types";
 import { AnswerDetails } from "@/components/chat/answer-details";
 
 export function AnswerCard({ message }: { message: ChatMessage }) {
+  // 卡片正文先展示结论，依据只截前几条，避免主聊天区一下子太长。
   const basisPreview = message.answerPayload?.basis?.slice(0, 3) ?? message.basisPreview ?? [];
   const badgeText =
     message.status === "streaming"
@@ -27,6 +28,7 @@ export function AnswerCard({ message }: { message: ChatMessage }) {
         </span>
       </div>
 
+      {/* 这里放一个短版依据，更多细节折叠到下面。 */}
       {basisPreview.length ? (
         <section className="mb-4 rounded-2xl bg-[#f6f1e8] p-4">
           <h3 className="mb-2 text-sm font-semibold">Basis</h3>

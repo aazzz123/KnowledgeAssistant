@@ -8,11 +8,13 @@ from config import (
     REVIEW_MIN_EVIDENCE_COUNT,
     REVIEW_MIN_TOP_SCORE,
 )
+
+
 ENTITY_PATTERNS = [
-    re.compile(r"患者姓名为([\u4e00-\u9fff]{2,4})"),
-    re.compile(r"([\u4e00-\u9fff]{2,4})最近一次体检"),
-    re.compile(r"根据([\u4e00-\u9fff]{2,4})的"),
-    re.compile(r"([\u4e00-\u9fff]{2,4})的医疗历史"),
+    re.compile(r"对象名称为([\u4e00-\u9fffA-Za-z0-9_-]{2,30})"),
+    re.compile(r"([\u4e00-\u9fffA-Za-z0-9_-]{2,30})最近一次记录"),
+    re.compile(r"根据([\u4e00-\u9fffA-Za-z0-9_-]{2,30})的"),
+    re.compile(r"([\u4e00-\u9fffA-Za-z0-9_-]{2,30})的历史记录"),
 ]
 
 
@@ -25,6 +27,7 @@ class ReviewAssessment:
 
 
 def assess_review_need(question: str, evidence: List, metrics: Dict[str, float]) -> ReviewAssessment:
+    """根据证据情况做规则级审核判断。"""
     reasons: List[str] = []
     entities = sorted(extract_entities(evidence))
     evidence_count = int(metrics.get("top_evidence_count", 0))
@@ -53,6 +56,7 @@ def assess_review_need(question: str, evidence: List, metrics: Dict[str, float])
     if is_high_risk_query(question) and evidence_count == 0:
         reasons.append("High-risk question detected without supporting evidence.")
 
+    # 这里只做保守判断：宁可多进一次人工审核，也不让证据不足的问题直接放行。
     return ReviewAssessment(
         requires_human_review=bool(reasons),
         reasons=reasons,
@@ -62,12 +66,14 @@ def assess_review_need(question: str, evidence: List, metrics: Dict[str, float])
 
 
 def summarize_assessment(assessment: ReviewAssessment) -> str:
+    """把规则判断压成一段简短说明，方便继续传给模型。"""
     if not assessment.reasons:
         return "Rule checks passed."
     return " ".join(assessment.reasons)
 
 
 def extract_entities(evidence: List) -> set[str]:
+    """从证据文本里粗略抓取对象名，用来兜底多对象混淆场景。"""
     entities: set[str] = set()
     for item in evidence[:5]:
         text = item.text if hasattr(item, "text") else str(item.get("text", ""))
@@ -79,15 +85,20 @@ def extract_entities(evidence: List) -> set[str]:
 
 
 def is_high_risk_query(question: str) -> bool:
+    """先用轻量关键词做一层高风险识别，避免每次都走模型判断。"""
     normalized = question.lower()
     markers = [
-        "健康",
         "risk",
-        "治疗",
-        "diagnosis",
         "legal",
         "financial",
-        "药",
+        "compliance",
+        "contract",
+        "approval",
+        "合规",
+        "财务",
+        "合同",
+        "审批",
+        "风险",
         "建议",
     ]
     return any(marker in normalized for marker in markers)

@@ -13,6 +13,7 @@ WINDOWS_CJK_FONT_CANDIDATES = [
 
 
 def resolve_pdf_font_path() -> Path:
+    # 优先走系统自带中文字体，省得额外打包字体文件，也能避开 PDF 中文乱码问题。
     for candidate in WINDOWS_CJK_FONT_CANDIDATES:
         if candidate.exists():
             return candidate
@@ -34,6 +35,7 @@ def save_text_to_pdf(text: str, filename: str = "knowledge_report.pdf") -> str:
     pdf.add_page()
     pdf.add_font("KnowledgeAssistantCJK", "", str(font_path), uni=True)
     pdf.set_font("KnowledgeAssistantCJK", size=12)
+    # 空行也要占位写进去，不然导出的段落结构会被吃掉。
     for line in text.splitlines():
         pdf.multi_cell(0, 8, line or " ")
     pdf.output(str(path))

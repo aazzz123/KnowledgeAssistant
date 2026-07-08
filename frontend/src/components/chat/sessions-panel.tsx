@@ -19,6 +19,7 @@ export function SessionsPanel({
   onExportSession: (sessionId: string) => Promise<void>;
   onDeleteSession: (sessionId: string) => void;
 }) {
+  // 这里只维护哪一个菜单打开，不把菜单状态抬到父组件，省得会话切换时联动太多。
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   return (
@@ -59,6 +60,7 @@ export function SessionsPanel({
                   </p>
                 </button>
                 <div className="relative">
+                  {/* 三点菜单里只放轻操作，避免左侧会话区变得太重。 */}
                   <button
                     className={
                       isActive

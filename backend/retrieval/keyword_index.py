@@ -49,7 +49,7 @@ def build_keyword_records(chunks: List[str], source: Path) -> List[Dict]:
                 "metadata": {
                     "source": str(source),
                     "chunk_index": index,
-                    "paper_id": "",
+                    "document_id": "",
                     "title": source.stem,
                     "year": "",
                     "section": "",

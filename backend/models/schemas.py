@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 
 
 class EvidenceMetadata(BaseModel):
-    paper_id: str = ""
+    document_id: str = Field(default="")
     title: str = ""
     year: str = ""
     section: str = ""

@@ -1,6 +1,7 @@
 import type { ChatMessage } from "@/lib/types";
 
 export function AnswerDetails({ message }: { message: ChatMessage }) {
+  // 详情区只负责展开结构化字段，避免主卡片承担太多信息密度。
   const payload = message.answerPayload;
 
   return (
