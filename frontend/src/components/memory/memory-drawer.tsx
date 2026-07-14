@@ -1,40 +1,63 @@
 import type { SessionMemoryResponse } from "@/lib/types";
 
 export function MemoryDrawer({ memory }: { memory: SessionMemoryResponse | null }) {
-  // 这里展示的是会话摘要视图，不是完整记忆原文，重点是帮用户快速找上下文。
   return (
-    <section className="h-full rounded-[28px] bg-white p-5 shadow-sm ring-1 ring-black/5">
-      <h2 className="text-base font-semibold">会话记忆</h2>
-      <div className="mt-4 space-y-4 text-sm leading-7 text-black/65">
-        <div>
-          <p className="text-xs uppercase tracking-[0.18em] text-black/40">Current Topic</p>
-          <p className="mt-1">{memory?.current_topic || "暂无主题"}</p>
-        </div>
-        <div>
-          <p className="text-xs uppercase tracking-[0.18em] text-black/40">Recent Questions</p>
-          {memory?.recent_questions?.length ? (
-            <ul className="mt-1 list-disc pl-5">
-              {memory.recent_questions.map((question) => (
-                <li key={question}>{question}</li>
-              ))}
-            </ul>
-          ) : (
-            <p className="mt-1">暂无问题记录</p>
-          )}
-        </div>
-        <div>
-          <p className="text-xs uppercase tracking-[0.18em] text-black/40">Confirmed Answers</p>
-          {memory?.confirmed_answers?.length ? (
-            <ul className="mt-1 list-disc pl-5">
-              {memory.confirmed_answers.map((answer) => (
-                <li key={answer}>{answer}</li>
-              ))}
-            </ul>
-          ) : (
-            <p className="mt-1">暂无确认答案</p>
-          )}
-        </div>
+    <section className="shell-panel p-5 xl:flex-1">
+      <p className="section-label">记忆</p>
+      <h2 className="mt-2 text-xl font-semibold tracking-[-0.03em] text-ink">会话上下文</h2>
+
+      <div className="mt-5 space-y-4 text-sm leading-7">
+        <MemoryBlock title="当前主题" value={memory?.current_topic || "暂无主题"} />
+        <MemoryList
+          title="最近问题"
+          items={memory?.recent_questions ?? []}
+          emptyLabel="暂无最近问题记录。"
+        />
+        <MemoryList
+          title="已确认答案"
+          items={memory?.confirmed_answers ?? []}
+          emptyLabel="暂无已确认答案。"
+        />
       </div>
+    </section>
+  );
+}
+
+function MemoryBlock({ title, value }: { title: string; value: string }) {
+  return (
+    <section className="rounded-[24px] bg-[#faf6ef] p-4">
+      <p className="section-label">{title}</p>
+      <p className="mt-2 text-sm leading-7 text-black/72">{value}</p>
+    </section>
+  );
+}
+
+function MemoryList({
+  title,
+  items,
+  emptyLabel,
+}: {
+  title: string;
+  items: string[];
+  emptyLabel: string;
+}) {
+  return (
+    <section className="rounded-[24px] bg-[#faf6ef] p-4">
+      <p className="section-label">{title}</p>
+      {items.length ? (
+        <div className="mt-3 space-y-2">
+          {items.map((item) => (
+            <div
+              className="rounded-2xl bg-white/72 px-4 py-3 text-sm leading-7 text-black/72"
+              key={item}
+            >
+              {item}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-3 text-sm leading-7 text-black/55">{emptyLabel}</p>
+      )}
     </section>
   );
 }

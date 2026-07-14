@@ -4,6 +4,17 @@
 
 :root {
   color-scheme: light;
+  --background: #f3efe7;
+  --panel: rgba(255, 252, 247, 0.86);
+  --panel-strong: #fffdf9;
+  --panel-soft: #f8f3ea;
+  --line: rgba(28, 36, 44, 0.08);
+  --line-strong: rgba(28, 36, 44, 0.14);
+  --ink: #1c242c;
+  --muted: #64707c;
+  --accent: #bf6a34;
+  --accent-soft: rgba(191, 106, 52, 0.12);
+  --shadow: 0 24px 80px rgba(33, 28, 19, 0.08);
 }
 
 * {
@@ -14,12 +25,125 @@ html,
 body {
   margin: 0;
   padding: 0;
-  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  min-height: 100%;
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  background: var(--background);
+  color: var(--ink);
 }
 
 body {
   background:
-    radial-gradient(circle at top left, rgba(204, 122, 67, 0.18), transparent 30%),
-    radial-gradient(circle at bottom right, rgba(77, 106, 93, 0.16), transparent 28%),
-    #f6f1e8;
+    radial-gradient(circle at top left, rgba(191, 106, 52, 0.18), transparent 24%),
+    radial-gradient(circle at 85% 12%, rgba(28, 36, 44, 0.06), transparent 28%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.4), transparent 32%),
+    var(--background);
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.14) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.14) 1px, transparent 1px);
+  background-size: 36px 36px;
+  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.22), transparent 68%);
+  opacity: 0.5;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+::selection {
+  background: rgba(191, 106, 52, 0.18);
+}
+
+@layer components {
+  .shell-panel {
+    @apply rounded-[28px] border border-black/[0.06] bg-white/70 backdrop-blur-sm;
+    box-shadow: var(--shadow);
+  }
+
+  .surface-panel {
+    @apply rounded-[24px] border border-black/[0.06] bg-white/80;
+  }
+
+  .soft-panel {
+    @apply rounded-[22px] border border-black/[0.06] bg-[#faf6ef];
+  }
+
+  .section-label {
+    @apply text-[11px] font-semibold uppercase tracking-[0.18em] text-black/45;
+  }
+
+  .action-button {
+    @apply inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-medium transition duration-150;
+  }
+
+  .action-button-primary {
+    @apply action-button bg-clay text-white shadow-sm hover:-translate-y-[1px] hover:opacity-95 active:translate-y-0 active:scale-[0.98];
+  }
+
+  .action-button-secondary {
+    @apply action-button border border-black/10 bg-white text-ink hover:bg-black/[0.03] active:scale-[0.98];
+  }
+
+  .status-pill {
+    @apply inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em];
+  }
+
+  .field-base {
+    @apply w-full rounded-[22px] border border-black/10 bg-white px-4 py-3 text-sm text-ink outline-none transition;
+  }
+
+  .field-base:focus {
+    border-color: rgba(191, 106, 52, 0.5);
+    box-shadow: 0 0 0 4px rgba(191, 106, 52, 0.12);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.chat-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(191, 106, 52, 0.55) rgba(28, 36, 44, 0.08);
+}
+
+.chat-scrollbar::-webkit-scrollbar {
+  width: 10px;
+}
+
+.chat-scrollbar::-webkit-scrollbar-track {
+  background: rgba(28, 36, 44, 0.08);
+  border-radius: 999px;
+}
+
+.chat-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(191, 106, 52, 0.55);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.chat-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(191, 106, 52, 0.72);
+  background-clip: padding-box;
 }

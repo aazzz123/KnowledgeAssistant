@@ -2,11 +2,14 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import {
-  exportConversationPdf,
-  getSessionMemory,
-  submitFeedback,
-} from "@/lib/api";
+import { AnswerCard } from "@/components/chat/answer-card";
+import { MessageList } from "@/components/chat/message-list";
+import { QuestionInput } from "@/components/chat/question-input";
+import { SessionsPanel } from "@/components/chat/sessions-panel";
+import { EvidenceDrawer } from "@/components/evidence/evidence-drawer";
+import { MemoryDrawer } from "@/components/memory/memory-drawer";
+import { ReviewPanel } from "@/components/review/review-panel";
+import { exportConversationPdf, getSessionMemory, submitFeedback } from "@/lib/api";
 import { closeAssistantStream, createAssistantStream } from "@/lib/sse";
 import type {
   AssistantRunResponse,
@@ -15,13 +18,6 @@ import type {
   SessionEntry,
   SessionMemoryResponse,
 } from "@/lib/types";
-import { AnswerCard } from "@/components/chat/answer-card";
-import { MessageList } from "@/components/chat/message-list";
-import { QuestionInput } from "@/components/chat/question-input";
-import { SessionsPanel } from "@/components/chat/sessions-panel";
-import { EvidenceDrawer } from "@/components/evidence/evidence-drawer";
-import { MemoryDrawer } from "@/components/memory/memory-drawer";
-import { ReviewPanel } from "@/components/review/review-panel";
 
 const STORAGE_KEY = "knowledge-assistant-sessions";
 
@@ -30,8 +26,7 @@ type SessionState = {
   messages: ChatMessage[];
 };
 
-function createSession(title = "New Session"): SessionState {
-  // 会话 id 只在前端本地用，够唯一就行，不额外引入 uuid 依赖了。
+function createSession(title = "新会话"): SessionState {
   const id = `session-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
   return {
     entry: {
@@ -42,6 +37,23 @@ function createSession(title = "New Session"): SessionState {
     messages: [],
   };
 }
+
+const STATUS_COPY: Record<string, string> = {
+  "": "就绪",
+  "Connecting...": "连接中",
+  "Task started": "任务已开始",
+  "Evidence retrieved": "证据已检索",
+  "Draft completed": "草稿已完成",
+  "Review decided": "审核策略已判定",
+  "Drafting answer...": "正在生成草稿",
+  "Writing final answer...": "正在生成最终答案",
+  "Manual review required": "需要人工审核",
+  "Answer completed": "回答已完成",
+  "Submitting review...": "正在提交审核",
+  "Review completed": "审核已完成",
+  "Exporting PDF...": "正在导出 PDF",
+  "Request failed": "请求失败",
+};
 
 export function ChatLayout() {
   const initialSession = useMemo(() => createSession(), []);
@@ -58,6 +70,8 @@ export function ChatLayout() {
   const messages = activeSession?.messages ?? [];
   const latestAssistantMessage =
     [...messages].reverse().find((message) => message.role === "assistant") ?? null;
+  const latestUserMessage =
+    [...messages].reverse().find((message) => message.role === "user") ?? null;
   const reviewMessage =
     messages.find((message) => message.id === activeReviewMessageId) ?? null;
 
@@ -73,7 +87,6 @@ export function ChatLayout() {
         setActiveSessionId(parsed[0].entry.id);
       }
     } catch {
-      // 本地缓存如果结构坏了，直接丢掉比继续带着脏数据跑更省事。
       window.localStorage.removeItem(STORAGE_KEY);
     }
   }, []);
@@ -84,7 +97,6 @@ export function ChatLayout() {
 
   useEffect(() => {
     let mounted = true;
-    // 会话切换后顺手把记忆面板刷新掉，右侧信息就能跟当前聊天保持一致。
     getSessionMemory(activeSessionId)
       .then((payload) => {
         if (mounted) {
@@ -117,7 +129,7 @@ export function ChatLayout() {
   }
 
   function handleCreateSession() {
-    const session = createSession(`Session ${sessions.length + 1}`);
+    const session = createSession(`会话 ${sessions.length + 1}`);
     setSessions((current) => [session, ...current]);
     setActiveSessionId(session.entry.id);
     setActiveReviewMessageId(null);
@@ -141,7 +153,6 @@ export function ChatLayout() {
       const remaining = current.filter((session) => session.entry.id !== sessionId);
       if (remaining.length > 0) {
         if (sessionId === activeSessionId) {
-          // 删掉当前会话时，顺手把右侧审核态和记忆态也一起切干净。
           setActiveSessionId(remaining[0].entry.id);
           setActiveReviewMessageId(null);
           setSessionMemory(null);
@@ -196,7 +207,6 @@ export function ChatLayout() {
     const stream = createAssistantStream(question, targetSessionId, reviewPolicy);
     streamRef.current = stream;
 
-    // 这里把“阶段事件”和“答案增量事件”拆开处理，前端体验会比最后一次性出结果自然很多。
     stream.addEventListener("task_started", () => setStreamStatus("Task started"));
     stream.addEventListener("retrieval_completed", () => setStreamStatus("Evidence retrieved"));
     stream.addEventListener("draft_completed", () => setStreamStatus("Draft completed"));
@@ -234,7 +244,7 @@ export function ChatLayout() {
     stream.addEventListener("error", (event) => {
       const detail = safeParseEventData(event);
       updateMessage(targetSessionId, assistantMessageId, {
-        conclusion: detail?.detail || "Request failed. Please inspect backend logs.",
+        conclusion: detail?.detail || "请求失败，请检查后端日志。",
         status: "error",
       });
       setStreamStatus("Request failed");
@@ -252,14 +262,13 @@ export function ChatLayout() {
     payload: AssistantRunResponse,
     status: "waiting_feedback" | "completed",
   ) {
-    // 最终落库和展示仍然以结构化结果为准，流式 conclusion 只是中间态。
     updateMessage(sessionId, messageId, {
       taskId: payload.task_id,
       conclusion:
         payload.answer_payload?.conclusion ||
         payload.draft_payload?.conclusion ||
         payload.draft ||
-        "No conclusion available.",
+        "暂无结论。",
       basisPreview: (
         payload.answer_payload?.basis ??
         payload.draft_payload?.basis ??
@@ -310,20 +319,21 @@ export function ChatLayout() {
   async function handleExportForSession(sessionId: string, exportQuestion?: string) {
     const session = sessions.find((item) => item.entry.id === sessionId);
     const latestAssistant =
-      [...(session?.messages ?? [])].reverse().find((message) => message.role === "assistant") ?? null;
+      [...(session?.messages ?? [])]
+        .reverse()
+        .find((message) => message.role === "assistant") ?? null;
     const latestUser =
       [...(session?.messages ?? [])].reverse().find((message) => message.role === "user") ?? null;
 
     if (!latestAssistant) {
-      setStreamStatus("No answer is available to export in this session");
+      setStreamStatus("当前会话暂无可导出的答案");
       return;
     }
 
-    // 导出默认取这个会话里最近一条 assistant 回复，省得用户再手动选一次。
     setStreamStatus("Exporting PDF...");
     const result = await exportConversationPdf({
       session_id: sessionId,
-      question: exportQuestion || latestUser?.question || session?.entry.title || "Knowledge export",
+      question: exportQuestion || latestUser?.question || session?.entry.title || "知识库导出",
       answer_payload: latestAssistant.answerPayload ?? null,
       answer_text: latestAssistant.conclusion || latestAssistant.draft || "",
     });
@@ -334,10 +344,15 @@ export function ChatLayout() {
     setStreamStatus(`PDF exported: ${result.title}`);
   }
 
+  const statusLabel = STATUS_COPY[streamStatus] ?? streamStatus;
+  const sessionCount = sessions.length;
+  const evidenceCount = latestAssistantMessage?.retrievedEvidence?.length ?? 0;
+  const reviewPending = Boolean(reviewMessage);
+
   return (
-    <main className="min-h-screen bg-paper text-ink">
-      <div className="mx-auto grid min-h-screen max-w-[1600px] grid-cols-12 gap-4 p-4">
-        <aside className="col-span-3 space-y-4">
+    <main className="min-h-[100dvh] px-4 py-4 text-ink sm:px-5 lg:px-6">
+      <div className="mx-auto grid max-w-[1680px] gap-4 xl:grid-cols-[300px_minmax(0,1fr)_320px]">
+        <aside className="space-y-4 xl:sticky xl:top-4 xl:h-[calc(100dvh-2rem)] xl:overflow-hidden">
           <SessionsPanel
             sessions={sessions.map((item) => item.entry)}
             activeSessionId={activeSessionId}
@@ -348,35 +363,135 @@ export function ChatLayout() {
           />
           <MemoryDrawer memory={sessionMemory} />
         </aside>
-        <section className="col-span-6 flex min-h-[80vh] flex-col rounded-[32px] bg-white shadow-sm ring-1 ring-black/5">
-          <header className="border-b border-black/5 px-6 py-5">
-            <h1 className="text-2xl font-semibold tracking-tight">KnowledgeAssistant</h1>
-            {streamStatus ? (
-              <p className="mt-3 text-xs uppercase tracking-[0.2em] text-clay">{streamStatus}</p>
-            ) : null}
-          </header>
-          <div className="flex-1 overflow-y-scroll px-6 py-5 [scrollbar-gutter:stable]">
-            <div className="space-y-4 pr-1">
-              <MessageList messages={messages} />
-              {latestAssistantMessage?.role === "assistant" ? (
-                <AnswerCard message={latestAssistantMessage} />
-              ) : null}
+
+        <section className="shell-panel flex flex-col overflow-hidden xl:h-[calc(100dvh-2rem)]">
+          <div className="shrink-0 border-b border-black/5 px-5 py-4 sm:px-6">
+            <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+              <div className="max-w-2xl">
+                <p className="section-label">知识工作台</p>
+                <h1 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-ink sm:text-[2rem]">
+                  用更清晰、更从容的方式检索、审核并导出私有知识。
+                </h1>
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-3 lg:min-w-[390px]">
+                <div className="surface-panel px-4 py-3">
+                  <p className="section-label">会话</p>
+                  <p className="mt-2 text-2xl font-semibold tracking-[-0.04em]">{sessionCount}</p>
+                  <p className="mt-1 text-sm text-black/55">当前可用的对话线程</p>
+                </div>
+                <div className="surface-panel px-4 py-3">
+                  <p className="section-label">证据</p>
+                  <p className="mt-2 text-2xl font-semibold tracking-[-0.04em]">{evidenceCount}</p>
+                  <p className="mt-1 text-sm text-black/55">最近答案关联的证据条目</p>
+                </div>
+                <div className="surface-panel px-4 py-3">
+                  <p className="section-label">审核</p>
+                  <p className="mt-2 text-sm font-semibold tracking-[0.02em] text-clay">
+                    {reviewPending ? "待处理" : "状态正常"}
+                  </p>
+                  <p className="mt-2 text-sm text-black/55">
+                    {reviewPending
+                      ? "右侧面板中有待人工审核的内容。"
+                      : "当前会话没有待审批的阻塞任务。"}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <span className="status-pill bg-clay/10 text-clay">{statusLabel}</span>
+              <span className="rounded-full border border-black/[0.08] px-3 py-1 text-sm text-black/58">
+                审核模式：
+                {reviewPolicy === "auto"
+                  ? "自动"
+                  : reviewPolicy === "always"
+                    ? "始终审核"
+                    : "从不审核"}
+              </span>
+              <span className="rounded-full border border-black/[0.08] px-3 py-1 text-sm text-black/58">
+                当前会话：{activeSession?.entry.title || "未命名会话"}
+              </span>
             </div>
           </div>
-          <div className="border-t border-black/5 px-6 py-5">
-            <QuestionInput
-              reviewPolicy={reviewPolicy}
-              onReviewPolicyChange={setReviewPolicy}
-              onSubmit={handleQuestionSubmit}
-            />
+
+          <div className="min-h-0 flex-1 grid gap-0 lg:grid-cols-[minmax(0,1fr)_360px]">
+            <div className="min-h-0 border-b border-black/5 lg:border-b-0 lg:border-r">
+              <div className="flex min-h-[52dvh] flex-col xl:h-full xl:min-h-0">
+                <div className="chat-scrollbar min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-7">
+                  {messages.length === 0 ? (
+                    <EmptyConversationState />
+                  ) : (
+                    <div className="space-y-5">
+                      <MessageList messages={messages} />
+                      {latestAssistantMessage?.role === "assistant" ? (
+                        <AnswerCard message={latestAssistantMessage} />
+                      ) : null}
+                    </div>
+                  )}
+                </div>
+                <div className="shrink-0 border-t border-black/5 px-4 py-4 sm:px-6">
+                  <QuestionInput
+                    reviewPolicy={reviewPolicy}
+                    onReviewPolicyChange={setReviewPolicy}
+                    onSubmit={handleQuestionSubmit}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="min-h-0 bg-white/35 px-5 py-5 sm:px-6 xl:overflow-y-auto">
+              <div className="space-y-4">
+                <div className="soft-panel p-4">
+                  <p className="section-label">当前上下文</p>
+                  <p className="mt-2 text-base font-semibold text-ink">
+                    {latestUserMessage?.question || activeSession?.entry.title || "新会话"}
+                  </p>
+                  <p className="mt-2 text-sm leading-7 text-black/58">
+                    在查看答案、证据和导出状态时，始终保持最近一次用户意图清晰可见。
+                  </p>
+                </div>
+                <EvidenceDrawer evidence={latestAssistantMessage?.retrievedEvidence ?? []} />
+              </div>
+            </div>
           </div>
         </section>
-        <aside className="col-span-3 space-y-4">
-          <EvidenceDrawer evidence={latestAssistantMessage?.retrievedEvidence ?? []} />
+
+        <aside className="space-y-4 xl:sticky xl:top-4 xl:h-[calc(100dvh-2rem)] xl:overflow-hidden">
           <ReviewPanel message={reviewMessage} onSubmit={handleReviewSubmit} />
         </aside>
       </div>
     </main>
+  );
+}
+
+function EmptyConversationState() {
+  const prompts = [
+    "总结最新政策备忘录，并引用最关键的支撑证据。",
+    "比较两份内部文档，指出其中的冲突点或证据缺口。",
+    "在审核完成后，将当前答案导出为 PDF 报告。",
+  ];
+
+  return (
+    <div className="flex min-h-[420px] flex-col justify-between rounded-[28px] border border-dashed border-black/10 bg-white/55 p-6 sm:p-8">
+      <div>
+        <p className="section-label">从这里开始</p>
+        <h2 className="mt-3 max-w-xl text-2xl font-semibold tracking-[-0.04em] text-ink sm:text-[2rem]">
+          向助手提出一个与文档密切相关的问题，工作区就会围绕它展开。
+        </h2>
+        <p className="mt-3 max-w-[58ch] text-sm leading-7 text-black/58 sm:text-[15px]">
+          左侧会显示会话记忆，右侧显示证据与审核，中间主区域则持续呈现结构化答案。
+        </p>
+      </div>
+
+      <div className="mt-8 grid gap-3">
+        {prompts.map((prompt) => (
+          <div className="surface-panel px-4 py-4" key={prompt}>
+            <p className="text-sm leading-7 text-black/72">{prompt}</p>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
